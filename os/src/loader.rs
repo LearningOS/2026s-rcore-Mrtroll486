@@ -6,6 +6,7 @@
 //! [`KernelStack`] and [`UserStack`].
 
 use crate::config::*;
+use crate::syscall::SYSCALL_NUM;
 use crate::trap::TrapContext;
 use core::arch::asm;
 
@@ -28,6 +29,8 @@ static KERNEL_STACK: [KernelStack; MAX_APP_NUM] = [KernelStack {
 static USER_STACK: [UserStack; MAX_APP_NUM] = [UserStack {
     data: [0; USER_STACK_SIZE],
 }; MAX_APP_NUM];
+
+pub static mut USER_SC_CNT: [[usize; SYSCALL_NUM]; MAX_APP_NUM] = [[0; SYSCALL_NUM]; MAX_APP_NUM];
 
 impl KernelStack {
     fn get_sp(&self) -> usize {
