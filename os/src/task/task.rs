@@ -15,7 +15,7 @@ use core::cell::RefMut;
 pub struct TaskControlBlock {
     // Immutable
     /// Process identifier
-    pub pid: PidHandle,
+    pub pid:PidHandle,
 
     /// Kernel stack corresponding to PID
     pub kernel_stack: KernelStack,
