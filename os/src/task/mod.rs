@@ -15,6 +15,7 @@ mod switch;
 mod task;
 
 use crate::loader::{get_app_data, get_num_app};
+use crate::mm::{MapPermission, VirtAddr, VPNRange};
 use crate::sync::UPSafeCell;
 use crate::trap::TrapContext;
 use alloc::vec::Vec;
@@ -201,4 +202,73 @@ pub fn current_trap_cx() -> &'static mut TrapContext {
 /// Change the current 'Running' task's program break
 pub fn change_program_brk(size: i32) -> Option<usize> {
     TASK_MANAGER.change_current_program_brk(size)
+}
+
+/// increment the count of calling the syscall with id `id`
+pub fn current_syscall_incr(id: usize) {
+    let mut inner = TASK_MANAGER.inner.exclusive_access();
+    let current_task_id = inner.current_task;
+    let tcb_syscall_map = inner.tasks.get_mut(current_task_id).unwrap();
+    let item = tcb_syscall_map.syscall_cnt.entry(id).or_insert(0);
+    *item += 1;
+}
+
+/// get the count of calling the syscall with id `id`
+pub fn get_current_syscall_cnt(id: usize) -> usize {
+    let mut inner = TASK_MANAGER.inner.exclusive_access();
+    let current_task_id = inner.current_task;
+    let tcb_syscall_map = inner.tasks.get_mut(current_task_id).unwrap();
+    let item = tcb_syscall_map.syscall_cnt.entry(id).or_insert(0);
+    *item
+}
+
+/// alloc a chunk of memory for current task, starts from `start`, with length `len`, and with 
+/// permission `perm`. Returns 0 if success, 1 if already mapped pages in [start, start + len)
+/// 2 if Out of memory
+pub fn task_mmap(start: usize, len: usize, perm: MapPermission) -> usize {
+    let mut inner = TASK_MANAGER.inner.exclusive_access();
+    let cur_task_id = inner.current_task;
+    let cur_task_memset = &mut inner.tasks[cur_task_id].memory_set;
+
+    let start_vaddr= VirtAddr::from(start);
+    let end_vaddr = VirtAddr::from(start + len);
+    debug!("[kernel] mapping area: [{:#x}, {:#x}) for pid {}", start_vaddr.floor().0, end_vaddr.ceil().0, cur_task_id);
+    for vpn in VPNRange::new(start_vaddr.floor(), end_vaddr.ceil()) {
+        debug!("checkling page {:#x} for pid {}", start_vaddr.floor().0, cur_task_id);
+        if let Some(pte) = cur_task_memset.translate(vpn) {
+            if pte.is_valid() {
+                debug!("mmap failed because already mapped");
+                return 1;
+            }
+        }
+    }
+
+    cur_task_memset.insert_framed_area(start_vaddr, end_vaddr, perm);
+    0
+}
+
+/// dealloc a chunk of memory for current task, starts from `start`, with length `len`.
+/// Returns 0 if success, 1 if unmapped pages in [start, start + len)
+/// 2 if no map_area is removed (no identical start and end)
+pub fn task_munmap(start: usize, len: usize) -> usize {
+    let mut inner = TASK_MANAGER.inner.exclusive_access();
+    let cur_task_id = inner.current_task;
+    let cur_task_memset = &mut inner.tasks[cur_task_id].memory_set;
+    
+    let start_vaddr = VirtAddr::from(start);
+    let end_vaddr = VirtAddr::from(start + len);
+    debug!("[kernel] unmapping area: start {:#x}, length {:#x} for pid {}", start, len, cur_task_id);
+    for vpn in VPNRange::new(start_vaddr.floor(), end_vaddr.ceil()) {
+        if let Some(pte) = cur_task_memset.translate(vpn) {
+            if !pte.is_valid() {
+                debug!("munmap faileed because page {:#x} is not mapped", vpn.0);
+                return 1
+            }
+        } else {
+            debug!("munmap faileed because page {:#x} is not mapped", vpn.0);
+            return 1
+        }
+    }
+
+    if cur_task_memset.unmap(start_vaddr, end_vaddr) { 0 } else { 2 }
 }

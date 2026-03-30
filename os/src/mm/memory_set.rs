@@ -262,6 +262,19 @@ impl MemorySet {
             false
         }
     }
+    
+    /// unmap a chunk of memory
+    pub fn unmap(&mut self, start: VirtAddr, end: VirtAddr) -> bool {
+        let old_len = self.areas.len();
+        self.areas.retain_mut(|area| {
+            if area.vpn_range.get_start() == start.floor() 
+                && area.vpn_range.get_end() == end.ceil() {
+                area.unmap(&mut self.page_table);
+                false
+            } else { true }
+        });
+        if old_len != self.areas.len() { true } else { false }
+    }
 }
 /// map area structure, controls a contiguous piece of virtual memory
 pub struct MapArea {

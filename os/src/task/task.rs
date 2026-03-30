@@ -1,4 +1,6 @@
 //! Types related to task management
+use alloc::collections::btree_map::BTreeMap;
+
 use super::TaskContext;
 use crate::config::TRAP_CONTEXT_BASE;
 use crate::mm::{
@@ -28,6 +30,9 @@ pub struct TaskControlBlock {
 
     /// Program break
     pub program_brk: usize,
+    
+    /// Syscall counter
+    pub syscall_cnt: BTreeMap<usize, usize>,
 }
 
 impl TaskControlBlock {
@@ -63,6 +68,7 @@ impl TaskControlBlock {
             base_size: user_sp,
             heap_bottom: user_sp,
             program_brk: user_sp,
+            syscall_cnt: BTreeMap::new()
         };
         // prepare TrapContext in user space
         let trap_cx = task_control_block.get_trap_cx();
