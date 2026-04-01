@@ -3,10 +3,9 @@ use alloc::sync::Arc;
 
 use crate::{
     loader::get_app_data_by_name,
-    mm::{translated_refmut, translated_str, translated_byte_buffer, MapPermission},
+    mm::{MapPermission, translated_byte_buffer, translated_refmut, translated_str},
     task::{
-        add_task, current_task, current_user_token, exit_current_and_run_next,
-        suspend_current_and_run_next, task_mmap, task_munmap,
+        TaskControlBlock, add_task, current_task, current_user_token, exit_current_and_run_next, suspend_current_and_run_next, task_mmap, task_munmap
     },
     timer::get_time_us,
 };
@@ -106,10 +105,9 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
 /// get time with second and microsecond
 pub fn sys_get_time(ts: *mut TimeVal, _tz: usize) -> isize {
     trace!(
-        "kernel:pid[{}] sys_get_time NOT IMPLEMENTED",
+        "kernel:pid[{}] sys_get_time",
         current_task().unwrap().pid.0
     );
-    debug!("called sys get time");
     let us = get_time_us();
     let result = TimeVal{
         sec: us / 1_000_000,
@@ -195,21 +193,40 @@ pub fn sys_sbrk(size: i32) -> isize {
     }
 }
 
-/// YOUR JOB: Implement spawn.
-/// HINT: fork + exec =/= spawn
-pub fn sys_spawn(_path: *const u8) -> isize {
+/// Spawn a new process, set the parent to current task
+pub fn sys_spawn(path: *const u8) -> isize {
     trace!(
-        "kernel:pid[{}] sys_spawn NOT IMPLEMENTED",
+        "kernel:pid[{}] sys_spawn",
         current_task().unwrap().pid.0
     );
-    -1
+    let token = current_user_token();
+    let path = translated_str(token, path);
+    if let Some(data) = get_app_data_by_name(path.as_str()) {
+        let parent_task = current_task().unwrap();
+        let child_task = Arc::new(TaskControlBlock::spawn(
+            data, 
+            Arc::downgrade(&parent_task)
+        ));
+        let child_pid = child_task.getpid();
+        parent_task.inner_exclusive_access().children.push(child_task.clone());
+        add_task(child_task);
+        child_pid as isize
+    } else {
+        -1
+    }
 }
 
-// YOUR JOB: Set task priority.
-pub fn sys_set_priority(_prio: isize) -> isize {
+/// Change the priority of current task to `prio`
+pub fn sys_set_priority(prio: isize) -> isize {
     trace!(
-        "kernel:pid[{}] sys_set_priority NOT IMPLEMENTED",
+        "kernel:pid[{}] sys_set_priority",
         current_task().unwrap().pid.0
     );
-    -1
+    if prio >= 2 {
+        let current_task = current_task().unwrap();
+        current_task.inner_exclusive_access().stride.set_stride(prio as u64);
+        prio
+    } else {
+        -1
+    }
 }
