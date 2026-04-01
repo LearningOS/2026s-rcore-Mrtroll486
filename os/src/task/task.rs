@@ -11,13 +11,39 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::cell::RefMut;
 
+const BIG_STRIDE: u64 = 1000_000;
+
+/// A Wrapper for u64 in order to implement the stride scheduling algorithm
+pub struct Stride {
+    stride: u64,
+    pass: u64,
+}
+
+impl Stride {
+    pub fn new(prior: u64) -> Self {
+        Stride { stride: BIG_STRIDE / prior, pass: 0 }
+    }
+    
+    pub fn _step(&mut self) {
+        self.pass += self.stride;
+    }
+    
+    pub fn set_stride(&mut self, prior: u64) {
+        self.stride = BIG_STRIDE / prior;
+    }
+    
+    pub fn get_pass(&self) -> u64 {
+        self.pass
+    }
+}
+
 /// Task control block structure
 ///
 /// Directly save the contents that will not change during running
 pub struct TaskControlBlock {
     // Immutable
     /// Process identifier
-    pub pid:PidHandle,
+    pub pid: PidHandle,
 
     /// Kernel stack corresponding to PID
     pub kernel_stack: KernelStack,
@@ -71,6 +97,9 @@ pub struct TaskControlBlockInner {
 
     /// Program break
     pub program_brk: usize,
+    
+    /// Stride struct, used to implement the stride scheduling algorithm
+    pub stride: Stride,
 }
 
 impl TaskControlBlockInner {
@@ -135,6 +164,7 @@ impl TaskControlBlock {
                     ],
                     heap_bottom: user_sp,
                     program_brk: user_sp,
+                    stride: Stride::new(16),
                 })
             },
         };
@@ -148,6 +178,56 @@ impl TaskControlBlock {
             trap_handler as usize,
         );
         task_control_block
+    }
+    
+    /// Spawn a new process from elf whose parent is `parent`
+    pub fn spawn(elf_data: &[u8], parent: Weak<TaskControlBlock>) -> TaskControlBlock {
+        let (memory_set, user_sp, entry_point) = MemorySet::from_elf(elf_data);
+        let trap_cx_ppn = memory_set
+            .translate(VirtAddr::from(TRAP_CONTEXT_BASE).into())
+            .unwrap()
+            .ppn();
+        // alloc pid and kernel stack
+        let pid_handle = pid_alloc();
+        let kernel_stack = kstack_alloc();
+        let kernel_stack_top = kernel_stack.get_top();
+        // push a task context which gose to trap_return to the top of kernel stack
+        let tcb = TaskControlBlock {
+            pid: pid_handle,
+            kernel_stack,
+            inner: unsafe {
+                UPSafeCell::new(TaskControlBlockInner {
+                    trap_cx_ppn,
+                    base_size: user_sp,
+                    task_cx: TaskContext::goto_trap_return(kernel_stack_top),
+                    task_status: TaskStatus::Ready,
+                    memory_set,
+                    parent: Some(parent),
+                    children: Vec::new(),
+                    exit_code: 0,
+                    fd_table: vec![
+                        // 0 -> stdin
+                        Some(Arc::new(Stdin)),
+                        // 1 -> stdout
+                        Some(Arc::new(Stdout)),
+                        // 2 -> stderr
+                        Some(Arc::new(Stdout)),
+                    ],
+                    heap_bottom: user_sp,
+                    program_brk: user_sp,
+                    stride: Stride::new(16),
+                })
+            }
+        };
+        let trap_cx = tcb.inner_exclusive_access().get_trap_cx();
+        *trap_cx = TrapContext::app_init_context(
+            entry_point,
+            user_sp,
+            KERNEL_SPACE.exclusive_access().token(),
+            kernel_stack_top, 
+            trap_handler as usize
+        );
+        tcb
     }
 
     /// Load a new elf to replace the original application address space and start execution
@@ -216,6 +296,7 @@ impl TaskControlBlock {
                     fd_table: new_fd_table,
                     heap_bottom: parent_inner.heap_bottom,
                     program_brk: parent_inner.program_brk,
+                    stride: Stride::new(16),
                 })
             },
         });

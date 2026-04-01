@@ -1,4 +1,5 @@
 //!Implementation of [`TaskManager`]
+use core::u64::{MAX};
 use super::TaskControlBlock;
 use crate::sync::UPSafeCell;
 use alloc::collections::VecDeque;
@@ -23,7 +24,23 @@ impl TaskManager {
     }
     /// Take a process out of the ready queue
     pub fn fetch(&mut self) -> Option<Arc<TaskControlBlock>> {
-        self.ready_queue.pop_front()
+        if self.ready_queue.len() == 0 {
+            None
+        } else {
+            let mut min_idx = 0;
+            let mut min_pass: u64 = MAX;
+            for (idx, item) in self.ready_queue.iter().enumerate() {
+                let item_pass = item.inner_exclusive_access().stride.get_pass();
+                if min_pass > item_pass {
+                    min_pass = item_pass;
+                    min_idx = idx;
+                }
+            }
+            // increment the pass for the selected process
+            let next_task = self.ready_queue.remove(min_idx).unwrap();
+            next_task.inner_exclusive_access().stride._step();
+            Some(next_task)
+        }
     }
 }
 

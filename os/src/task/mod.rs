@@ -135,7 +135,7 @@ pub fn task_mmap(start: usize, len: usize, perm: MapPermission) -> usize {
     let end_vaddr = VirtAddr::from(start + len);
     debug!("[kernel] mapping area: [{:#x}, {:#x}) for pid {}", start_vaddr.floor().0, end_vaddr.ceil().0, cur_task_id);
     for vpn in VPNRange::new(start_vaddr.floor(), end_vaddr.ceil()) {
-        debug!("checkling page {:#x} for pid {}", start_vaddr.floor().0, cur_task_id);
+        debug!("checking page {:#x} for pid {}", start_vaddr.floor().0, cur_task_id);
         if let Some(pte) = cur_task_memset.translate(vpn) {
             if pte.is_valid() {
                 debug!("mmap failed because already mapped");
@@ -143,6 +143,7 @@ pub fn task_mmap(start: usize, len: usize, perm: MapPermission) -> usize {
             }
         }
     }
+    debug!("[kernel] page vaildness check pass");
 
     cur_task_memset.insert_framed_area(start_vaddr, end_vaddr, perm);
     0
