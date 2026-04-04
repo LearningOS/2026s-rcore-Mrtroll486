@@ -1,5 +1,3 @@
-use core::usize;
-
 use super::{
     block_cache_sync_all, get_block_cache, BlockDevice, DirEntry, DiskInode, DiskInodeType,
     EasyFileSystem, DIRENT_SZ,
@@ -119,7 +117,6 @@ impl Inode {
                 }
             }
             let dirent = DirEntry::new(name, new_inode_id);
-            
             if empty_idx == usize::MAX {
                 // no empty DirEnt
                 let new_size = (file_count + 1) * DIRENT_SZ;
@@ -290,8 +287,9 @@ impl Inode {
         }
         // decrease the nlink in old file
         debug!("increase the nlink in old file");
-        let old_inode_id = self.find(&name).unwrap().get_inode_id();
-        let fs = self.fs.lock();
+        let old_inode = self.find(&name).unwrap();
+        let old_inode_id = old_inode.get_inode_id();
+        let mut fs = self.fs.lock();
         let (old_inode_block_id, old_inode_block_offset) = fs
             .get_disk_inode_pos(old_inode_id);
         let new_nlink = get_block_cache(
@@ -325,7 +323,9 @@ impl Inode {
         // if nlink is 0, then delete data
         if new_nlink == 0 {
             // the deletion should be performed
-            
+            fs.dealloc_inode(old_inode.get_inode_id());
+            drop(fs);
+            old_inode.clear();
         }
         block_cache_sync_all();
         true
