@@ -5,13 +5,14 @@
 //! `UPSafeCell<OSInodeInner>` -> `OSInode`: for static `ROOT_INODE`,we
 //! need to wrap `OSInodeInner` into `UPSafeCell`
 use super::File;
-use crate::drivers::BLOCK_DEVICE;
+use crate::{drivers::BLOCK_DEVICE, fs::StatMode};
 use crate::mm::UserBuffer;
 use crate::sync::UPSafeCell;
+use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use bitflags::*;
-use easy_fs::{EasyFileSystem, Inode};
+use easy_fs::{DiskInodeType, EasyFileSystem, Inode};
 use lazy_static::*;
 
 /// inode in memory
@@ -52,6 +53,15 @@ impl OSInode {
             v.extend_from_slice(&buffer[..len]);
         }
         v
+    }
+    /// Get the inode id of this inode
+    pub fn get_inode_id(&self) -> u32 {
+        self.inner.exclusive_access().inode.get_inode_id()
+    }
+    /// Get the nlink and file type
+    pub fn get_stat(&self) -> (u32, StatMode) {
+        let (nlink, file_type) = self.inner.exclusive_access().inode.get_stat();
+        (nlink, if file_type == DiskInodeType::Directory { StatMode::DIR } else { StatMode::FILE })
     }
 }
 
@@ -125,6 +135,17 @@ pub fn open_file(name: &str, flags: OpenFlags) -> Option<Arc<OSInode>> {
     }
 }
 
+/// Create a hardlink in root dir
+pub fn linkat_root(old_name: String, new_name: String) -> bool {
+    info!("The inode id of Root dir is {}", ROOT_INODE.get_inode_id());
+    ROOT_INODE.linkat(old_name, new_name)
+}
+
+/// Remove a link in root dir
+pub fn unlinkat_root(name: String) -> bool {
+    ROOT_INODE.unlinkat(name)
+}
+
 impl File for OSInode {
     fn readable(&self) -> bool {
         self.readable
@@ -155,5 +176,8 @@ impl File for OSInode {
             total_write_size += write_size;
         }
         total_write_size
+    }
+    fn as_os_inode(&self) -> Option<&OSInode> {
+        Some(self)
     }
 }

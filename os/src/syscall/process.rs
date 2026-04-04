@@ -202,6 +202,7 @@ pub fn sys_spawn(path: *const u8) -> isize {
     let token = current_user_token();
     let path = translated_str(token, path);
     if let Some(data) = open_file(path.as_str(), OpenFlags::RDONLY) {
+        debug!("the inode id of appliction {} is {}", path, data.get_inode_id());
         let parent_task = current_task().unwrap();
         let child_task = Arc::new(TaskControlBlock::spawn(
             data.read_all().as_slice(), 

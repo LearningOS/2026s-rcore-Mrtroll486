@@ -1,12 +1,13 @@
 use super::{get_block_cache, BlockDevice, BLOCK_SZ};
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use core::fmt::{Debug, Formatter, Result};
+use core::{fmt::{Debug, Formatter, Result}, u32};
 
 /// Magic number for sanity check
 const EFS_MAGIC: u32 = 0x3b800001;
 /// The max number of direct inodes
-const INODE_DIRECT_COUNT: usize = 28;
+/// Note that this direct cnt has been reduced 1 in order to add a nlink in DiskInode
+const INODE_DIRECT_COUNT: usize = 27;
 /// The max length of inode name
 const NAME_LENGTH_LIMIT: usize = 27;
 /// The max number of indirect1 inodes
@@ -70,7 +71,9 @@ impl SuperBlock {
 /// Type of a disk inode
 #[derive(PartialEq)]
 pub enum DiskInodeType {
+    /// the file pointed by this diskInode is a file
     File,
+    /// the file pointed by this diskInode is a directory
     Directory,
 }
 
@@ -86,6 +89,7 @@ pub struct DiskInode {
     pub indirect1: u32,
     pub indirect2: u32,
     type_: DiskInodeType,
+    pub nlink: u32,
 }
 
 impl DiskInode {
@@ -97,6 +101,7 @@ impl DiskInode {
         self.indirect1 = 0;
         self.indirect2 = 0;
         self.type_ = type_;
+        self.nlink = 1;
     }
     /// Whether this inode is a directory
     pub fn is_dir(&self) -> bool {
@@ -387,6 +392,17 @@ impl DiskInode {
         }
         write_size
     }
+    /// increment this disk inode's nlink count
+    pub fn link(&mut self) {
+        self.nlink += 1;
+    }
+    /// decrement this disk inode's nlink count, if nlink reduced to zero, 
+    /// perform real file deletion
+    #[allow(unused)]
+    pub fn unlink(&mut self) -> u32 {
+        self.nlink -= 1;
+        self.nlink
+    }
 }
 /// A directory entry
 #[repr(C)]
@@ -430,5 +446,9 @@ impl DirEntry {
     /// Get inode number of the entry
     pub fn inode_id(&self) -> u32 {
         self.inode_id
+    }
+    /// Mark a dirent as deleted by setting the `inode_id` to `u32::MAX`
+    pub fn mark_as_deleted(&mut self) {
+        self.inode_id = u32::MAX
     }
 }
