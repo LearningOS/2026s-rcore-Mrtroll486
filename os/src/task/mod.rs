@@ -76,6 +76,17 @@ pub fn exit_current_and_run_next(exit_code: i32) {
         "kernel: pid[{}] exit_current_and_run_next",
         current_task().unwrap().process.upgrade().unwrap().getpid()
     );
+    let task = current_task().unwrap();
+    let task_inner = task.inner_exclusive_access();
+    let tid = task_inner.res.as_ref().unwrap().tid;
+    drop(task_inner);
+    drop(task);
+    let process = current_process();
+    let mut process_inner = process.inner_exclusive_access();
+    process_inner.mutex_res_tracker.dealloc_tid(tid);
+    process_inner.sema_res_tracker.dealloc_tid(tid);
+    drop(process_inner);
+    drop(process);
     // take from Processor
     let task = take_current_task().unwrap();
     let mut task_inner = task.inner_exclusive_access();

@@ -14,6 +14,104 @@ use alloc::sync::{Arc, Weak};
 use alloc::vec;
 use alloc::vec::Vec;
 use core::cell::RefMut;
+use core::usize;
+
+/// Tracker for mutex and semaphore resources
+#[derive(Clone)]
+pub struct ResTracker {
+    /// Available resources
+    pub available: Vec<usize>,
+    /// Allocated resources
+    pub alloc: Vec<Vec<usize>>,    
+    /// Needed resources
+    pub need: Vec<Vec<usize>>,
+}
+
+impl ResTracker {
+    /// init a tracker
+    pub fn new() -> Self {
+        Self {
+            available: Vec::new(),
+            alloc: vec![Vec::new()], 
+            need: vec![Vec::new()]
+        }
+    }
+    /// add a new resource with initial value
+    pub fn add_new_res(&mut self, init_val: usize) {
+        self.available.push(init_val);
+        for item in self.alloc.iter_mut() {
+            item.push(0);
+        };
+        for item in self.need.iter_mut() {
+            item.push(0);
+        }
+    }
+    /// Reset a res with `init_val` at `idx`
+    pub fn reset_res(&mut self, init_val: usize, idx: usize) {
+        self.available[idx] = init_val;
+        for item in self.alloc.iter_mut() {
+            item[idx] = 0;
+        };
+        for item in self.need.iter_mut() {
+            item[idx] = 0;
+        }
+    }
+    /// add a new thread into tracker
+    pub fn insert_new_thread(&mut self) {
+        let new_res_vec: Vec<usize> = self.available.iter().map(|_| 0).collect();
+        self.alloc.push(new_res_vec.clone());
+        self.need.push(new_res_vec);
+    }
+    /// dealloc all res allocated to task `tid`
+    pub fn dealloc_tid(&mut self, tid: usize) {
+        for (res_id, res_cnt) in self.alloc[tid].iter_mut().enumerate() {
+            self.available[res_id] += *res_cnt;
+            *res_cnt = 0;
+            self.need[tid][res_id] = 0;
+        }
+    }
+    /// Determine a res request by `tid` for `res_id` with `request_val` will 
+    /// cause a deadlock or not. Return true if no deadlock detected
+    pub fn deadlock_detect(&self) -> bool {
+        let thread_count = self.alloc.len();
+        let res_count = self.available.len();
+        debug!("now there are {} types of res, {} threads are using them", res_count, thread_count);
+        
+        // attempting to assigjn
+        let mut work = self.available.clone();
+
+        let temp_need = self.need.clone();
+
+        let mut finish = vec![false; thread_count];
+
+        // safty check loop
+        loop {
+            let mut found = false;
+            for i in 0..thread_count {
+                if !finish[i] {
+                    let mut can_finish = true;
+                    for j in 0..res_count {
+                        if temp_need[i][j] > work[j] {
+                        can_finish = false;
+                        break;
+                    }
+                }
+
+                if can_finish {
+                    for j in 0..res_count {
+                        work[j] += self.alloc[i][j];
+                    }
+                    finish[i] = true;
+                    found = true;
+                }
+            }
+        }
+            if !found { break; }
+        }
+
+        finish.iter().all(|&f| f)
+    }
+}
 
 /// Process Control Block
 pub struct ProcessControlBlock {
@@ -49,6 +147,12 @@ pub struct ProcessControlBlockInner {
     pub semaphore_list: Vec<Option<Arc<Semaphore>>>,
     /// condvar list
     pub condvar_list: Vec<Option<Arc<Condvar>>>,
+    /// mutex res tracker
+    pub mutex_res_tracker: ResTracker,
+    /// semaphore res tracker
+    pub sema_res_tracker: ResTracker,
+    /// flag for enable deadlock detect
+    pub enable_deadlock_check: bool,
 }
 
 impl ProcessControlBlockInner {
@@ -119,6 +223,9 @@ impl ProcessControlBlock {
                     mutex_list: Vec::new(),
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
+                    mutex_res_tracker: ResTracker::new(),
+                    sema_res_tracker: ResTracker::new(),
+                    enable_deadlock_check: false
                 })
             },
         });
@@ -245,6 +352,9 @@ impl ProcessControlBlock {
                     mutex_list: Vec::new(),
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
+                    mutex_res_tracker: parent.mutex_res_tracker.clone(),
+                    sema_res_tracker: parent.sema_res_tracker.clone(),
+                    enable_deadlock_check: parent.enable_deadlock_check
                 })
             },
         });

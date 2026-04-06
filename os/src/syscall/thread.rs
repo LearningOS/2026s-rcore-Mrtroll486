@@ -50,6 +50,8 @@ pub fn sys_thread_create(entry: usize, arg: usize) -> isize {
         trap_handler as usize,
     );
     (*new_task_trap_cx).x[10] = arg;
+    process_inner.mutex_res_tracker.insert_new_thread();
+    process_inner.sema_res_tracker.insert_new_thread();
     new_task_tid as isize
 }
 /// get current thread id syscall
